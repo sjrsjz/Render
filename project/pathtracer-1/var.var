@@ -1,0 +1,5 @@
+mode tex
+vec3 Position -50 -41 60
+vec3 Rotation 26.43 0.0618 0
+tex iChannel0 0 "texture\noise.bmp"
+tex iChannel1 1 "texture\2.bmp"

@@ -1,0 +1,53 @@
+#version 430 core
+layout (local_size_x=256) in;
+layout (rgba32f,binding=0) uniform image1D sound_;
+layout (binding=0) uniform sampler1D fft_;
+
+uniform float iTime,iDt;
+uniform int iFrame;
+int lp;
+void F(float x);
+vec4 Load(int pos){
+    return imageLoad(sound_,pos);
+}
+void Store(int pos,vec4 data0){
+    imageStore(sound_,pos,data0);
+}
+vec4 Load(){
+    return imageLoad(sound_,lp);
+}
+void Store(vec4 data0){
+    imageStore(sound_,lp,data0);
+}
+void main(){
+    lp=int(gl_GlobalInvocationID.x);
+    Store(lp,Load(lp));
+    F(lp.x/float(imageSize(sound_)));
+}
+
+#include "common.nml"
+
+float S(float x){
+    return 1;
+}
+const float PI=3.14159265358;
+void F(float x){
+    if(iFrame<=1){
+        Store(vec4(0));return;
+    }
+    vec2 off=vec2(cos(-iTime*lp.x*PI*44100*16),sin(iTime*lp.x*PI*44100*16));
+    vec4 B=texelFetch(fft_,lp.x,0);//*exp(-x*100);//+texture(fft_,x);
+    B*=exp(-0.0125*abs(B));
+    //B=texelFetch(fft_,lp.x,0);//+=vec4(0,1,0,0)*float(lp.x==imageSize(sound_)-2);
+//    B.xy=cMul(B.xy,off);
+    vec2 s=B.xy;
+    float strength=length(s);
+    vec4 a=Load();
+    if(a.z*exp(-(pow(iTime-a.w+1,3)-0.5))<=strength){
+        a.w=iTime;a.z=strength;a.xy=s;
+
+    }
+    vec4 A=0*mix(Load(),B/(0.25+4*x),1-exp(-x*1000*iDt));
+    A+=B;
+    Store(A);
+}

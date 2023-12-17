@@ -1,0 +1,756 @@
+layout (rgba32f,binding=0) uniform image2D input_;
+layout (rgba32f,binding=1) uniform image2D output_;
+layout (rgba32f,binding=2) uniform image2D data_;
+layout (rgba32f,binding=3) uniform image2D data_2;
+layout (rgba32f,binding=4) uniform image2D data_3;
+layout (binding=0) uniform sampler2D iChannel0;
+layout (binding=1) uniform sampler2D iChannel1;
+uniform float iTime,scale;
+uniform int Raw_iFrame,iOffset,iW,iH;
+uniform vec4 Position2D;
+uniform vec3 Position;
+uniform mat4 Eye_Mat;
+uniform int CutSize=1;
+//output the original pixel information
+uniform int ifOutputRAW=0;
+uniform int ifOutputBigImage=0;
+
+bool progressive_vertical_scroll=false;
+
+int iFrame=0;
+const float PI=3.14159265358;
+
+ivec2 lp;
+void F(float x,float y);
+vec4 Load(ivec2 pos){
+    return imageLoad(input_,pos);
+}
+void Store(ivec2 pos,vec4 data0){
+    imageStore(output_,pos,data0);
+}
+vec4 Load(){
+    return imageLoad(input_,lp);
+}
+void Store(vec4 data0){
+    imageStore(output_,lp,data0);
+}
+void main(){
+    lp=ivec2(gl_GlobalInvocationID.xy);
+    Store(lp,Load(lp));
+    vec2 XY=vec2(2.0*(lp.x/float(iW)-0.5),2.0*((lp.y+iOffset*iH)/float(iW)-0.5));
+    
+    if(ifOutputBigImage==0&&progressive_vertical_scroll){
+        float divCut=float(CutSize)/iH;
+        int cut=iH/CutSize;
+        iFrame=int(floor(float(Raw_iFrame)/cut));
+        float iFrame_offset=mod(float(Raw_iFrame),cut)*divCut;
+        vec2 FragCoord=XY*0.5+0.5;
+        if(FragCoord.y<iFrame_offset||FragCoord.y>=iFrame_offset+divCut)
+            {Store(Load());return;}
+    }else{
+        iFrame=Raw_iFrame;
+    }
+    F(XY.x,XY.y);
+}
+
+
+//----------------------------------------------------------------------------------------
+//  1 out, 1 in...
+float hash11(float p)
+{
+    p = fract(p * .1031);
+    p *= p + 33.33;
+    p *= p + p;
+    return fract(p);
+}
+
+//----------------------------------------------------------------------------------------
+//  1 out, 2 in...
+float hash12(vec2 p)
+{
+	vec3 p3  = fract(vec3(p.xyx) * .1031);
+    p3 = fract(tan(dot(p3,p3)*20*atan(p3))) ;
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+//----------------------------------------------------------------------------------------
+//  1 out, 3 in...
+float hash13(vec3 p3)
+{
+	p3  = fract(p3 * .1031);
+    p3 = fract(tan(dot(p3,p3)*20*atan(p3))) ;
+    p3 += dot(p3, p3.zyx + 31.32);
+    return fract((p3.x + p3.y) * p3.z);
+}
+//----------------------------------------------------------------------------------------
+// 1 out 4 in...
+float hash14(vec4 p4)
+{
+	p4 = fract(p4  * vec4(.1031, .1030, .0973, .1099));
+    p4 = fract(tan(dot(p4,p4)*20*atan(p4))) ;
+
+    p4 += dot(p4, p4.wzxy+33.33);
+    return fract((p4.x + p4.y) * (p4.z + p4.w));
+}
+
+//----------------------------------------------------------------------------------------
+//  2 out, 1 in...
+vec2 hash21(float p)
+{
+	vec3 p3 = fract(vec3(p) * vec3(.1031, .1030, .0973));
+	p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xx+p3.yz)*p3.zy);
+
+}
+
+//----------------------------------------------------------------------------------------
+///  2 out, 2 in...
+vec2 hash22(vec2 p)
+{
+	vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yzx+33.33);
+    return fract((p3.xx+p3.yz)*p3.zy);
+
+}
+
+//----------------------------------------------------------------------------------------
+///  2 out, 3 in...
+vec2 hash23(vec3 p3)
+{
+	p3 = fract(p3 * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yzx+33.33);
+    return fract((p3.xx+p3.yz)*p3.zy);
+}
+
+//----------------------------------------------------------------------------------------
+//  3 out, 1 in...
+vec3 hash31(float p)
+{
+   vec3 p3 = fract(vec3(p) * vec3(.1031, .1030, .0973));
+   p3 += dot(p3, p3.yzx+33.33);
+   return fract((p3.xxy+p3.yzz)*p3.zyx); 
+}
+
+
+//----------------------------------------------------------------------------------------
+///  3 out, 2 in...
+vec3 hash32(vec2 p)
+{
+	vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yxz+33.33);
+    return fract((p3.xxy+p3.yzz)*p3.zyx);
+}
+
+//----------------------------------------------------------------------------------------
+///  3 out, 3 in...
+vec3 hash33(vec3 p3)
+{
+	p3 = fract(p3 * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yxz+33.33);
+    return fract((p3.xxy + p3.yxx)*p3.zyx);
+
+}
+
+//----------------------------------------------------------------------------------------
+// 4 out, 1 in...
+vec4 hash41(float p)
+{
+	vec4 p4 = fract(vec4(p) * vec4(.1031, .1030, .0973, .1099));
+    p4 += dot(p4, p4.wzxy+33.33);
+    return fract((p4.xxyz+p4.yzzw)*p4.zywx);
+    
+}
+
+//----------------------------------------------------------------------------------------
+// 4 out, 2 in...
+vec4 hash42(vec2 p)
+{
+	vec4 p4 = fract(vec4(p.xyxy) * vec4(.1031, .1030, .0973, .1099));
+    p4 += dot(p4, p4.wzxy+33.33);
+    return fract((p4.xxyz+p4.yzzw)*p4.zywx);
+
+}
+
+//----------------------------------------------------------------------------------------
+// 4 out, 3 in...
+vec4 hash43(vec3 p)
+{
+	vec4 p4 = fract(vec4(p.xyzx)  * vec4(.1031, .1030, .0973, .1099));
+    p4 += dot(p4, p4.wzxy+33.33);
+    return fract((p4.xxyz+p4.yzzw)*p4.zywx);
+}
+
+//----------------------------------------------------------------------------------------
+// 4 out, 4 in...
+vec4 hash44(vec4 p4)
+{
+	p4 = fract(p4  * vec4(.1031, .1030, .0973, .1099));
+    p4 += dot(p4, p4.wzxy+33.33);
+    return fract((p4.xxyz+p4.yzzw)*p4.zywx);
+}
+
+vec2 rot(vec2 a,float theata){
+    return a.xx*vec2(cos(theata),sin(theata))+a.yy*vec2(-sin(theata),cos(theata));
+}
+vec3 rot(vec3 a,vec3 range){
+    a.yz=rot(a.yz,range.x);
+    a.xz=rot(a.xz,range.y);
+    a.xy=rot(a.xy,range.z);
+    return a; 
+}
+float mix2(float A,float B,float x){
+    return (B-A)*x+A;
+}
+vec2 cMul(vec2 a, vec2 b) {
+	return vec2(a.x*b.x-a.y*b.y,a.x*b.y+a.y*b.x);
+}
+vec2 cLog(vec2 a) {
+	float b =  atan(a.y,a.x);
+	if (b<0.0) b+=2.0*3.1415926535;
+	return vec2(log(length(a)),b);
+}
+vec2 cExp(vec2 z) {
+	return exp(z.x) * vec2(cos(z.y), sin(z.y));
+}
+vec2 cPow(vec2 z, vec2 a) {
+	return cExp(cMul(cLog(z), a));
+}
+vec2 cDiv(vec2 a, vec2 b){
+  float d = dot(b,b);
+  return vec2(dot(a,b),a.y*b.x-a.x*b.y)/d;
+}
+
+float hash( float n )
+{
+  return fract(cos(n)*41415.92653);
+}
+
+
+float rand_i=0.;
+float rand(vec3 p3)
+{
+    rand_i += 0.4;
+    p3=rot(p3,vec3(rand_i));
+    p3 += rand_i+float(iFrame);
+    p3  = fract(p3 * .1031);
+    p3 += dot(p3, p3.zyx + 31.32);
+    return fract((p3.x + p3.y) * p3.z);
+}
+float rand(vec2 p)
+{
+    rand_i += 0.4;
+    p=rot(p,rand_i);
+    p += rand_i+float(iFrame);
+    vec3 p3  = fract(vec3(p.xyx) * .1031);
+    p3 = fract(tan(dot(p3,p3)*20*atan(p3))) ;
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+vec3 rndS(vec3 pos){
+    return normalize(tan(vec3(rand(pos)-0.5,rand(pos)-0.5,rand(pos)-0.5)));
+}
+float luma(vec3 c){
+    return dot(c,vec3(0.299,0.587,0.114));
+}
+vec4 rColor(vec3 c,float cosA){
+    cosA=abs(cosA);
+    vec3 A0=1-sqrt(c);vec3 A1=1+sqrt(c);
+    vec3 B=sqrt(4*sqrt(c)+cosA*cosA*pow(A0,vec3(2)));
+    vec3 s0=(cosA*A0-B)/max(cosA*A0+B,1e-5);
+    vec3 s1=(B*A0-cosA*A1*A1)/max(B*A0+cosA*A1*A1,1e-5);
+    vec3 R=0.5*(s0*s0+s1*s1);
+    return vec4(R,luma(R));
+}
+float HGGX_Lamda(float VoN,float a,vec2 g){
+    float tan2=1./(VoN*VoN)-1;
+    vec2 A=sqrt(1+g*a*a*tan2);
+    return (log((1+A.y)/(1+A.x))-A.y+A.x)/log(g.x/g.y);
+}
+
+float HGGX_G2(float VoN,float LoN,float a,vec2 g){
+    float L1=HGGX_Lamda(VoN,a,g);float L2=HGGX_Lamda(LoN,a,g);
+    return clamp((1.+L1)/(1+L2+L1),0,1);
+}
+vec3 HGGXNormal(vec3 normal,float roughness,vec2 g,vec3 pos){
+    vec3 randN0;randN0.y=-length(normal.xz);
+    if(length(normal.xz)<=0)
+        randN0.xz=vec2(1,0);
+    else
+        randN0.xz=normalize(normal.xz)*normal.y;
+    vec3 randN1=cross(normal,randN0);
+    float alpha=rand(pos)*32*PI;
+    float tmp=rand(pos);
+    vec2 A=pow(g,vec2(tmp-1));
+    float beta=roughness*atan(dot(A,vec2(-g.x,g.y))/(A.x-A.y));
+    
+    return (cos(beta))*normal+sin(beta)*(cos(alpha)*randN0+sin(alpha)*randN1);
+}
+float HGGXdf(float theta,float fai,float a,vec2 g){
+    float a2=a*a;
+    float cos2=cos(theta);
+    vec2 A=1+(g*a2-1)*cos2;
+    return 1-log(A.x/A.y)/log(g.x/g.y);
+}
+float HGGXpdf(float theta,float fai,float a,vec2 g){
+    float a2=a*a;
+    float cos2=cos(theta);
+    vec2 A=1+(g*a2-1)*cos2;
+    return a2*(g.x-g.y)*cos(theta)/(log(g.x/g.y)*PI*A.x*A.y);
+}
+
+float randAB(float A,float B,float s,vec3 pos){
+    return mix2(A,B,float(s>rand(pos)));
+}
+float mixp(float F,float S){
+    return F*S/max(1+(S-1)*F,1e-5);
+}
+float fresnel(vec3 v,vec3 n,float rs){
+    float cosa=dot(v,n);
+    float cosb=sqrt(max(1-(1-cosa*cosa)/(rs*rs),0));
+    return 0.5*(pow((cosa-rs*cosb)/max(cosa+rs*cosb,1e-4),2)+pow((cosb-rs*cosa)/max(cosb+rs*cosa,1e-4),2));
+}
+
+float Smoke(vec3 pos,vec3 rd,float density){
+    float s=0.01+hash13(pos+iFrame+rd)*0.99;
+    float d=-log(s)/density;
+    return d;
+}
+
+
+float noise( in vec2 x )
+{
+    vec2 p = floor(x);
+    vec2 w = fract(x);
+    vec2 u = w*w*(3.0-2.0*w);
+    float n = 176.74*p.x + 317.0*p.y ;
+    return mix( mix(hash(n+  0.0),hash(n+  1.0),u.x),
+                     mix(hash(n+317.07),hash(n+318.07),u.x),u.y);   
+}
+mat3 randM(vec2 pos,float b){
+    pos=floor(pos);mat3 m0;
+    for(int i=0;i<=2;i++)
+        for(int j=0;j<=2;j++)
+            m0[i][j]=b==0?floor(noise(pos+vec2(i,j))*2):noise(pos+vec2(i,j))+max(b,0)*i+max(-b,0)*j;
+    return m0;
+}
+vec2 CellNoise(vec2 pos,int smooth_){
+    vec2 p0;p0=floor(pos);vec2 p1;
+    mat3 m0x,m1x,m0y,m1y,m0,m1;
+    m0x=randM(p0,1);m0y=randM(p0,-1);m0=randM(p0,0);
+    m0x+=p0.x-1;m0y+=p0.y-1;
+    int step=smooth_;
+    float d00=1e10;
+    for(int k=0;k<step;k++)
+    {
+        p1=floor(pos*pow(3,k+1));
+        m1x=randM(p1+vec2(60.90,8),1);m1y=randM(p1,-1);
+        float s0=pow(3,-k-1);
+        m1x-=1;m1x*=s0;m1x+=p1.x*s0;
+        m1y-=1;m1y*=s0;m1y+=p1.y*s0;
+        for(int i=0;i<=2;i++){
+            for(int j=0;j<=2;j++){
+                vec2 a=vec2(m1x[i][j],m1y[i][j]);
+                float d=1000;
+                for(int i0=0;i0<=2;i0++){
+                    for(int j0=0;j0<=2;j0++){
+                        vec2 b=vec2(m0x[i0][j0],m0y[i0][j0]);
+                        float d1=distance(a,b);float tmp=float(d<d1);
+                        d=min(d,d1);m1[i][j]=tmp*(m1[i][j]-m0[i0][j0])+m0[i0][j0];
+                    }}
+
+            }}
+        m0x=m1x;m0y=m1y;m0=m1;
+    }
+    float tmp0=0;float d=1000;
+    for(int i=0;i<=2;i++){
+        for(int j=0;j<=2;j++){
+            vec2 a=vec2(m1x[i][j],m1y[i][j]);
+            float d1=distance(a,pos);float tmp=float(d<d1);
+            d=min(d,d1);tmp0=tmp*(tmp0-m1[i][j])+m1[i][j];
+        }}
+    return vec2(tmp0,d);
+}
+vec3 hsv2rgb(vec3 c){
+    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+vec3 rgb2hsv(vec3 c){
+
+    const vec4 k=vec4(0.0,-1.0/3.0,2.0/3.0,-1.0);
+    vec4 p=mix(vec4(c.bg,k.wz),vec4(c.gb,k.xy),step(c.b,c.g));
+    vec4 q=mix(vec4(p.xyw,c.r),vec4(c.r,p.yzx),step(p.x,c.r));
+    float d=q.x-min(q.w,q.y);
+    return vec3(abs(q.z+(q.w-q.y)/(6*d+0.001)),d/(q.x+0.001),q.x);
+
+}
+
+vec3 ACESFilm( vec3 x )
+{
+    float tA = 2.51;
+    float tB = 0.03;
+    float tC = 2.43;
+    float tD = 0.59;
+    float tE = 0.14;
+    return clamp((x*(tA*x+tB))/(x*(tC*x+tD)+tE),0.0,1.0);
+}
+
+
+
+object newObj(float d,float d2,int id,int i_id,int s){
+    object o;o.d=d;o.d2=d2;o.id=id;o.i_id=i_id;o.s=s;
+    return o;
+}
+object near(object A,vec3 B){
+    object c;
+    c.d2=A.d>abs(B.y)?B.y:A.d2;
+    float tmp=mix2(A.i_id,B.z,float(B.y<0));
+    c.s=A.s+int(B.y<0);
+    B.y=abs(B.y);
+    c.id=int(mix2(A.id,B.x,float(A.d>B.y)));
+    c.d=min(A.d,B.y);
+    c.i_id=int(tmp);
+    return c;
+}
+
+vec2 rotClamp(vec2 pos,int n){
+    float alpha=-atan(pos.x,pos.y);
+    float tmp=PI/n;
+    return abs(rot(pos,-alpha+mod(alpha,2*tmp)-tmp));
+}
+vec3 rnd33(vec3 p3)
+{
+	p3 = fract(p3 * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yxz+33.33);
+    return fract((p3.xxy + p3.yxx)*p3.zyx);
+}
+
+mat2 rot(float a) {return mat2(cos(a),sin(a),-sin(a),cos(a));}
+
+float ndot(vec2 a, vec2 b ) { return a.x*b.x - a.y*b.y; }
+float sdSphere(vec3 p,float r){
+    return length(p)-r;
+}
+float sdBoundingBox( vec3 p, vec3 b, float e )
+{
+  p=abs(p)-b;
+  vec3 q=abs(p+e)-e;
+  return min(min(
+      length(max(vec3(p.x,q.y,q.z),0.0))+min(max(p.x,max(q.y,q.z)),0.0),
+      length(max(vec3(q.x,p.y,q.z),0.0))+min(max(q.x,max(p.y,q.z)),0.0)),
+      length(max(vec3(q.x,q.y,p.z),0.0))+min(max(q.x,max(q.y,p.z)),0.0));
+}
+float sdEllipsoid( in vec3 p, in vec3 r ) // approximated
+{
+    float k0 = length(p/r);
+    float k1 = length(p/(r*r));
+    return k0*(k0-1.0)/k1;
+}
+float sdTorus( vec3 p, vec2 t )
+{
+    return length( vec2(length(p.xz)-t.x,p.y) )-t.y;
+}
+float sdBox( vec3 p, vec3 b )
+{
+    vec3 d = abs(p) - b;
+    return min(max(d.x,max(d.y,d.z)),0.0) + length(max(d,0.0));
+}
+
+
+#define USE_SMOOTH_NOISE 1   // enable to prevent discontinuities
+
+
+// value noise, and its analytical derivatives
+vec3 noised( in vec2 x )
+{
+    vec2 f = fract(x);
+    #if USE_SMOOTH_NOISE==0
+    vec2 u = f*f*(3.0-2.0*f);
+    vec2 du = 6.0*f*(1.0-f);
+    #else
+    vec2 u = f*f*f*(f*(f*6.0-15.0)+10.0);
+    vec2 du = 30.0*f*f*(f*(f-2.0)+1.0);
+    #endif
+
+#if 0
+    // texel fetch version
+    ivec2 p = ivec2(floor(x));
+    float a = texelFetch( iChannel0, (p+ivec2(0,0))&255, 0 ).x;
+	float b = texelFetch( iChannel0, (p+ivec2(1,0))&255, 0 ).x;
+	float c = texelFetch( iChannel0, (p+ivec2(0,1))&255, 0 ).x;
+	float d = texelFetch( iChannel0, (p+ivec2(1,1))&255, 0 ).x;
+#else    
+    // texture version    
+    vec2 p = floor(x);
+	float a = textureLod( iChannel0, fract((p+vec2(0.5,0.5))/256.0), 0.0 ).x;
+	float b = textureLod( iChannel0, fract((p+vec2(1.5,0.5))/256.0), 0.0 ).x;
+	float c = textureLod( iChannel0, fract((p+vec2(0.5,1.5))/256.0), 0.0 ).x;
+	float d = textureLod( iChannel0, fract((p+vec2(1.5,1.5))/256.0), 0.0 ).x;
+#endif
+    
+	return vec3(a+(b-a)*u.x+(c-a)*u.y+(a-b-c+d)*u.x*u.y,
+				du*(vec2(b-a,c-a)+(a-b-c+d)*u.yx));
+}
+
+const mat2 m3 = mat2(0.8,-0.6,0.6,0.8);
+
+float fbm( vec2 p )
+{
+    float f = 0.0;
+    f += 0.5000*texture( iChannel0, fract(p/256.0 )).x; p = m3*p*2.02;
+    f += 0.2500*texture( iChannel0, fract(p/256.0 )).x; p = m3*p*2.03;
+    f += 0.1250*texture( iChannel0, fract(p/256.0 )).x; p = m3*p*2.01;
+    f += 0.0625*texture( iChannel0, fract(p/256.0 )).x;
+    return f/0.9375;
+}
+float fbm( vec2 p ,int n)
+{
+    float f = 0.0;float j=1;
+    p/=256.0;
+    for(int i=0;i<=n;i++){
+    j*=0.5;
+    f += j*texture( iChannel0, fract(p)).x; p = m3*p*2.03;
+    }
+    return f;
+}
+// la,lb=semi axis, h=height, ra=corner
+float sdRhombus(vec3 p, float la, float lb, float h, float ra)
+{
+    p = abs(p);
+    vec2 b = vec2(la,lb);
+    float f = clamp( (ndot(b,b-2.0*p.xz))/dot(b,b), -1.0, 1.0 );
+	vec2 q = vec2(length(p.xz-0.5*b*vec2(1.0-f,1.0+f))*sign(p.x*b.y+p.z*b.x-b.x*b.y)-ra, p.y-h);
+    return min(max(q.x,q.y),0.0) + length(max(q,0.0));
+}
+float sdCone( in vec3 p, in vec2 c, float h )
+{
+  // c is the sin/cos of the angle, h is height
+  // Alternatively pass q instead of (c,h),
+  // which is the point at the base in 2D
+  vec2 q = h*vec2(c.x/c.y,-1.0);
+    
+  vec2 w = vec2( length(p.xz), p.y );
+  vec2 a = w - q*clamp( dot(w,q)/dot(q,q), 0.0, 1.0 );
+  vec2 b = w - q*vec2( clamp( w.x/q.x, 0.0, 1.0 ), 1.0 );
+  float k = sign( q.y );
+  float d = min(dot( a, a ),dot(b, b));
+  float s = max( k*(w.x*q.y-w.y*q.x),k*(w.y-q.y)  );
+  return sqrt(d)*sign(s);
+}
+float sdCappedCylinder( vec3 p, float h, float r )
+{
+  vec2 d = abs(vec2(length(p.xz),p.y)) - vec2(h,r);
+  return min(max(d.x,d.y),0.0) + length(max(d,0.0));
+}
+float dSphere(vec3 p,vec3 rd,float r){
+    float d0=sdSphere(p,r);
+    float b=dot(p,rd);
+    float c=dot(p,p)-r*r;
+    float h=b*b-c;
+    h = h>=0?sqrt( h ):1e20;
+    float d1=abs(-b-sign(d0)*h);
+    d1-=1e-5;
+    d1=max(d1,0);
+    d1*=sign(d0);
+    return rd==vec3(0)?d0:d1;
+}
+float dPlane(vec3 p,vec3 rd,vec4 n){
+    float d0=dot(n,vec4(p,1))/length(n.xyz);
+    float d1=-abs(d0)/dot(rd,normalize(n.xyz));
+    d1=d1>=0?d1:1e20;
+    d1-=1e-4;
+    d1*=sign(d0);
+    return rd==vec3(0)?d0:d1;
+}
+float dBox(vec3 ro,vec3 rd,vec3 boxSize){
+    float d0=sdBox(ro,boxSize);    
+    vec3 m = 1.0/rd; // can precompute if traversing a set of aligned boxes
+    vec3 n = m*ro;   // can precompute if traversing a set of aligned boxes
+    vec3 k = abs(m)*boxSize;
+    vec3 t1 = -n - k;
+    vec3 t2 = -n + k;
+    float tN = max( max( t1.x, t1.y ), t1.z );
+    float tF = min( min( t2.x, t2.y ), t2.z );
+    float d1=d0>=0?tN:tF;//vec2( tN, tF );
+    d1=tN>tF || tF<0.0?1e20:d1;
+    d1-=1e-4;
+    d1*=sign(d0);
+    return rd==vec3(0)?d0:d1;
+}
+
+
+//#define USE_SMOOTH_NOISE 1   // enable to prevent discontinuities
+
+#define SC (1.0)
+
+// value noise, and its analytical derivatives
+
+
+
+float terrainH( in vec2 x )
+{
+	vec2  p = x*0.003/SC;
+    float a = 0.0;
+    float b = 1.0;
+	vec2  d = vec2(0.0);
+    for( int i=0; i<16; i++ )
+    {
+        vec3 n = noised(p);
+        d += n.yz;
+        a += b*n.x/(1.0+dot(d,d));
+		b *= 0.5;
+        p = m3*p*2.0+vec2(1,25);
+    }
+
+    #if USE_SMOOTH_NOISE==1
+    a *= 0.9;
+    #endif
+	return SC*120.0*a;
+}
+
+float terrainL( in vec2 x )
+{
+	vec2  p = x*0.003/SC;
+    float a = 0.0;
+    float b = 1.0;
+	vec2  d = vec2(0.0);
+    for( int i=0; i<6; i++ )
+    {
+        vec3 n = noised(p);
+        d += n.yz;
+        a += b*n.x/(1.0+2*dot(d,d));
+		b *= 0.5;
+        p = m3*p*2.0+vec2(1,25);
+    }
+
+    #if USE_SMOOTH_NOISE==1
+    a *= 0.9;
+    #endif
+	return SC*120.0*a;
+}
+vec4 noised( in vec3 x )
+{
+    vec3 p = floor(x);
+    vec3 w = fract(x);
+	vec3 u = w*w*(3.0-2.0*w);
+    vec3 du = 6.0*w*(1.0-w);
+    
+    float n = p.x + p.y*157.0 + 113.0*p.z;
+    
+    float a = hash(n+  0.0);
+    float b = hash(n+  1.0);
+    float c = hash(n+157.0);
+    float d = hash(n+158.0);
+    float e = hash(n+113.0);
+	float f = hash(n+114.0);
+    float g = hash(n+270.0);
+    float h = hash(n+271.0);
+	
+    float k0 =   a;
+    float k1 =   b - a;
+    float k2 =   c - a;
+    float k3 =   e - a;
+    float k4 =   a - b - c + d;
+    float k5 =   a - c - e + g;
+    float k6 =   a - b - e + f;
+    float k7 = - a + b + c - d + e - f - g + h;
+
+    return vec4( k0 + k1*u.x + k2*u.y + k3*u.z + k4*u.x*u.y + k5*u.y*u.z + k6*u.z*u.x + k7*u.x*u.y*u.z, 
+                 du * (vec3(k1,k2,k3) + u.yzx*vec3(k4,k5,k6) + u.zxy*vec3(k6,k4,k5) + k7*u.yzx*u.zxy ));
+}
+
+
+vec4 fbm3D( in vec3 x ,int n)
+{
+    const float scale  = 1.5;
+
+    float a = 0.0;
+    float b = 0.5;
+	float f = 1.0;
+    vec3  d = vec3(0.0);
+//    float t=1.25*min(x.y*2-2,1);
+    for( int i=0; i<n; i++ )
+    {
+        vec4 n = noised(f*x*scale);
+        a += b*n.x;           // accumulate values		
+        d += b*n.yzw*f*scale; // accumulate derivatives
+        b *= 0.5;             // amplitude decrease
+        f *= 1.8;             // frequency increase
+    }
+
+	return vec4( a, d );
+}
+vec4 fbm3D2( in vec3 x ,int n)
+{
+    const float scale  = 4.;
+
+    float a = 0.0;
+    float b = 0.5;
+    float f = 1.0;
+    vec3  d = vec3(0.0);
+    for( int i=0; i<n; i++ )
+    {
+        vec4 n = noised(f*x*scale);
+        a += b*n.x;           // accumulate values		
+        d += b*n.yzw*f*scale; // accumulate derivatives
+        b *= 0.5;             // amplitude decrease
+        f *= 2;             // frequency increase
+    }
+
+	return vec4( a, d );
+}
+float sph( ivec3 i, vec3 f, ivec3 c )
+{
+   // random radius at grid vertex i+c
+   float rad = 0.5*hash13(vec3(i+c));
+   // distance to sphere at grid vertex i+c
+   return length(f-vec3(c)) - rad; 
+}
+
+float sdBase( vec3 p )
+{
+   ivec3 i = ivec3(floor(p));
+    vec3 f =       fract(p);
+   // distance to the 8 corners spheres
+   return min(min(min(sph(i,f,ivec3(0,0,0)),
+                      sph(i,f,ivec3(0,0,1))),
+                  min(sph(i,f,ivec3(0,1,0)),
+                      sph(i,f,ivec3(0,1,1)))),
+              min(min(sph(i,f,ivec3(1,0,0)),
+                      sph(i,f,ivec3(1,0,1))),
+                  min(sph(i,f,ivec3(1,1,0)),
+                      sph(i,f,ivec3(1,1,1)))));
+}
+float smin( float a, float b, float k )
+{
+    float h = max(k-abs(a-b),0.0);
+    return min(a, b) - h*h*0.25/k;
+}
+
+// https://iquilezles.org/articles/smin
+float smax( float a, float b, float k )
+{
+    float h = max(k-abs(a-b),0.0);
+    return max(a, b) + h*h*0.25/k;
+}
+float sdFbm( vec3 p, float d ,int n0)
+{
+   float s = 1.0;
+   for( int i=0; i<n0; i++ )
+   {
+       // evaluate new octave
+       float n = s*sdBase(p);
+	
+       // add
+       n = smax(n,d-0.1*s,0.3*s);
+       d = smin(n,d      ,0.3*s);
+	
+       // prepare next octave
+       p = mat3( 0.00, 1.60, 1.20,
+                -1.60, 0.72,-0.96,
+                -1.20,-0.96, 1.28 )*p;
+       s = 0.5*s;
+   }
+   return d;
+}

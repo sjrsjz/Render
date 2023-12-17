@@ -1,0 +1,84 @@
+##include<"include.ml">;
+
+Shader_Main{
+    N:buf0;
+    N:buf1;
+    N:buf0_s;
+    N:sound_s;
+    R:time;
+    N:SizeW;N:SizeH;
+    N:Frame;
+    N:bufA;N:bufB;N:buf2;
+    N:front;N:Offset;
+    N:lOffset;
+    vec4:Position2D;
+    N:fft;N:sound_buffer;
+    R:scale;
+    var_update(N:name)->N:={
+        Frame=0;front=1
+    }
+    frame_start()->N:={
+        getFFT(&"sound0",fft,2048);
+        Offset=GetFloat(&"offset");
+        scale=GetFloat(&"scale");
+        getVec4(&"Position2D",Position2D);
+        if(lOffset!=Offset){
+            Frame=0
+        };
+        lOffset=Offset;
+        front=-front;
+        bufA=buf0;bufB=buf1;
+        if(front==1){
+            bufA=buf1;bufB=buf0
+        };
+        time(&time);
+    }
+    frame_update()->N:={
+        Shader(sound_s);
+        Buf(sound_buffer,0);
+        Tex(fft,0,1);
+        setF(&"iTime",time);
+        compute(2048/256,1,1);
+    
+        Shader(buf0_s);
+        Buf(bufA,0);Buf(bufB,1);
+        Buf(buf2,2);
+        Tex(sound_buffer,0,1);
+        setF(&"iTime",time);
+        setI(&"iFrame",Frame);
+        setI(&"iOffset",Offset);
+        setI(&"iW",SizeW);
+        setI(&"iH",SizeH);
+        setF(&"scale",scale);
+        setVec4(&"Position2D",Position2D);
+        N:size0=SizeW/DefaultPixelSize;
+        N:size1=SizeH/DefaultPixelSize;
+        compute(size0,size1,1);
+        Shader(0);
+        return(1);//if zero,then keep updating
+    }
+    frame_end()->N:={
+        Frame=Frame+1;
+        return(bufB);//return the texture/buffer which you want to display
+    }
+    shader_start()->N:={
+        Frame=0;
+        front=1;
+        lOffset=0;
+        SizeW=DefaultSize;SizeH=SizeW;
+        if(ifOutputBigImage!=0){
+            SizeH=DefaultLineSize*DefaultPixelSize;
+        };
+        buf0=buffer2D(SizeW,SizeH);
+        buf1=buffer2D(SizeW,SizeH);
+        buf2=buffer2D(SizeW,SizeH);
+        fft=buffer1D(2048);
+        sound_buffer=buffer1D(2048);
+        buf0_s=getShader(&"buf0");
+        sound_s=getShader(&"sound");
+    }
+    shader_end()->N:={
+        freeTex(buf0);freeTex(buf1);freeTex(buf2);
+        freeTex(fft);freeTex(sound_buffer);
+    }
+}

@@ -1,0 +1,155 @@
+vec3 lightDir=-normalize(vec3(0.25,0.25,-0.5));//Sun light direction
+vec3 rotPos;
+vec3 VoxelMap(vec3 pos){
+    return vec3(0);
+}
+const float Size=1;
+const int Iterations=15;
+float sdVerticalCapsule( vec3 p, float r, float h )
+{
+  p.y+=h/2;
+  p.y -= clamp( p.y, 0.0, h );
+  return length( p ) - r;
+}
+float box(vec3 p, vec3 s) {
+    p=abs(p)-s;
+    return max(p.x, max(p.y,p.z));
+	//return length(max(p,vec3(0))) + min(0.,max(p.x,max(p.y,p.z)));
+}
+// value noise, and its analytical derivatives
+float hex(vec3 p, vec3 s) {
+  vec3 ap=abs(p);
+  float prof=max(ap.x-s.x,(ap.x+ap.z)*.7-s.z);
+  return max(ap.y+max(-1.,prof)-s.y,prof);
+}
+
+// sdf to randomly moved boxes in a grid of size re
+float gribble(vec3 p, vec3 re) {
+  vec3 r1=(fract(p/re+.5)-.5)*re;
+  return box(r1+rnd33(floor(p/4.+.5))*2.-1.,re*.4)*.7;
+}
+
+float vessel(vec3 p) {
+  
+  p.x=abs(p.x);
+  // main frame
+  float d = box(p, vec3(8,5,30));
+  
+  // top 3 layers
+  float u = min(hex(p-vec3(0,0,15),vec3(6,7,20)),min(hex(p-vec3(0,0,24),vec3(4,9,12)),hex(p-vec3(0,0,28),vec3(2,11,8))));
+  u=max(u, (u+p.y+p.z*.3)*.7-5.);
+  d=min(d, u);
+  
+  // box random details
+  float g1=gribble(p, vec3(4,4,10));
+  float g2=gribble(p+3., vec3(7,3,8));
+  
+  d=min(d,max(d-0.4,g1));
+  d=min(d,max(d-0.3,g2));
+  
+  // reactors
+  vec3 p2=p-vec3(0,2,0);
+  p2.x=abs(p2.x)-5.;
+  d=min(d, max(abs(p.z-38.)-8.,abs(length(p2.xy)-3.-sin(p.z*.3+.9))-.3)-g1*.2);
+  
+  // wings
+  vec3 p3=p;
+  p3.xy*=rot(.3);
+  vec3 ap=abs(p3-vec3(0,0,22));
+  float l=max(p3.z-26.,max(abs(p3.y-1.)-.3,(ap.x*.7+ap.z*.3)-14.))-g2*.2;
+  d=min(d, l);
+  
+  return d*.8;
+}
+object DE(vec3 pos,vec3 rd) {
+    object hit0=newObj(Far,Far,-1,-1,0);
+    vec3 pos0=pos;
+    vec3 pos1=pos;
+    pos.y+=60;pos.zx-=100;
+    pos0=pos;
+    pos*=0.5;
+    pos+=vec3(-60,-48.5,10);
+    float h=pos.y+70-0.12*terrainH(5*pos.xz)-20/(1+0.01*length(pos.xz));
+    hit0=near(hit0,vec3(1,h*2,1));
+    pos=pos0;
+    if(enablewater) 
+        hit0=near(hit0,vec3(2,max(pos.y-0.000025*terrainH(pos.xz*3000),dPlane(pos,rd,vec4(0,1,0,-3))),2));
+    pos+=vec3(-10,-10,-10);
+    rotPos=rot(pos,vec3(0.5,0.4,0.-0.3+PI));
+    hit0=near(hit0,vec3(3,vessel(rotPos),1));
+    pos0=pos;
+    pos+=vec3(-35,10,10);
+    
+    //smoke
+    hit0=near(hit0,vec3(4,max(Smoke(pos,rd,3),max(fbm3D(pos*0.01,11).x-0.79/(1+0.025*length(pos)),dSphere(pos1-vec3(85,-43,87),rd,60))),3));
+    
+    
+    return hit0;
+}
+
+
+float fbm2( vec2 p )
+{
+    return fbm(p)*0.75+fbm(p*5)*0.25;
+}
+float snow_S(vec3 n,vec3 w,vec3 g,float a){
+    float tanA=sqrt(max(0,pow(abs(dot(n,w)),-2)-1));
+    float tanB=sqrt(max(0,pow(abs(dot(n,g)),-2)-1));
+    float a2=a*a;
+    float t=sqrt(tanB*tanB+a2);
+    return float(dot(n,g)<0)*2*a2/
+        ((1+sqrt(1+a2*tanA*tanA))*(tanB+t)*t);
+}
+vec4 mcolor(vec3 p,vec3 n){
+    float t=p.y*2.5+80;
+    vec3 c=vec3(0.3)*(fbm(p.xz*0.2)*0.3+1);
+    vec3 dirt=mix(vec3(0.55,0.35,0.25),vec3(0.55,0.35,0.25)*1.5,fbm(p.xz*0.01)+fbm(p.xz*0.1)*0.4);
+    float snow_S=clamp((t+100)*0.025*snow_S(n,normalize(vec3(0,1,0)),vec3(0,-1,0),1),0,1);
+    
+    c=mix(vec3(0.11,0.12,0.1),c,smoothstep(-40,-10,t+fbm(p.xz*0.05)*50));
+    vec3 grass0=0.3*mix(vec3(41,166,6)/255,vec3(145,163,26)/255,clamp(fbm3D(p*0.025,7).x,0,1));
+    vec3 grass=mix(dirt,grass0,clamp(smoothstep(-75,-150,t)*0.5+fbm(p.xz*0.5),0,1));
+    c=mix(grass,c,smoothstep(-50-fbm(m3*p.xz*0.1)*50,0.,t));    
+    float s=clamp(smoothstep(-200,100+fbm(p.xz*0.1)*100,t)*snow_S,0,1);
+    c=mix(c,vec3(1),s);
+    return vec4(c,pow(s,1));
+}
+material newMaterial(vec3 Cs,vec3 Cd,vec2 S,vec4 R,vec3 light){
+    material a;a.Cs=Cs;a.Cd=Cd;a.S=S;a.R=R;a.light=light;return a;
+}
+material Material(vec3 pos,vec3 nor,object o){
+    switch(o.id){
+        case 1:
+            vec4 c=mcolor(pos*2+vec3(0,30,0),nor);
+            return newMaterial(vec3(c.w+0.001),c.xyz,vec2(c.w+0.001,0),vec4(0.7,1,2,1.99),vec3(0));
+        case 2:
+            return newMaterial(vec3(0),vec3(1),vec2(0,1),vec4(0,0,2,1.99),vec3(0));
+        case 3:
+            return newMaterial(vec3(0.76,0.73,0.69),vec3(0),vec2(1,0),vec4(0.1,1,2,1.99),vec3(0));
+        case 4:
+            return newMaterial(vec3(0),vec3(0.),vec2(0,0),vec4(0.1,1,2,1.99),vec3(0));  
+    }
+
+    return newMaterial(vec3(0.1),vec3(0.9,0.9,0.9),vec2(1,0),vec4(0,1,2,1.99),vec3(0));
+}
+
+
+vec4 InsideMaterial(vec3 pos,object o){
+    if(o.i_id==1) return vec4(1.331,0,0,0);
+    if(o.i_id==2) return vec4(1.331,0,0,0);
+    if(o.i_id==3) return vec4(1.331,0,0,0);
+    return vec4(1,vec3(0));
+}
+vec4 InsideFog(vec3 pos,object o){
+    if(o.i_id==1) return vec4(0);
+    if(o.i_id==2) return vec4(0,5,4.5,4)*0.1;
+
+    return vec4(0,0,0,0);
+}
+
+//#define EnableObjectLight
+
+#ifdef EnableObjectLight
+vec4 centers[1]={{0,0,0,1}};
+int ids[1]={6};
+#endif

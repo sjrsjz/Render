@@ -1,0 +1,725 @@
+#version 430 core
+layout (local_size_x=####,local_size_y=####) in;//#### means default workspace size
+
+
+
+
+struct object{
+    float d;float d2;int id;int i_id;int s;
+};
+struct material{
+    vec3 Cs;vec3 Cd;vec2 S;vec4 R;vec3 light;
+};
+struct info{
+    vec3 rd_i;vec3 rd_o;
+    vec3 n;vec3 microNormal;
+    vec3 p;
+    object o;
+    material surface;
+    vec4 rC;
+    float n_i;float n_o;
+    float distance;
+    vec3 color;vec3 absorbtion;
+    float sampleRoughness;
+};
+#include "common.nml"
+
+//#define Correction
+const float EPSILONS=0.00015;
+const float EPSILON_MIN=0.001;
+const float Far=20000;
+const int MaxRay=4;
+const int MaxStep=384;
+const float DOF_R=0.;
+const vec2 DOF_Pos=vec2(0);
+const int AA=16;
+const float FOV=0.75;
+const float gamma=2.2;
+const float march_s=1;
+const float FogS=5;
+const float HdivW=9.0/16;
+
+vec3 rd_X;
+vec3 rd_Z;
+vec3 originalPos=vec3(0);
+
+info infos[MaxRay+1];
+float globalTime;
+bool enablewater=true;
+
+#include "World SDF.nml"
+
+
+float raycast(vec3 ro,vec3 rd,out vec3 ro_o,vec3 rd_o){
+    vec3 ro0=ro;
+    vec3 lro=ro,lrd=rd;
+    float t=0;
+    float t0=0;
+    float d=0,ld=0;
+    bool hit=false;
+    float alpha=march_s;
+    int sign=DE(ro,vec3(0)).s;
+    for(int i=0;i<MaxStep;i++){
+        object o=DE(ro,rd);
+        if(o.s!=sign){
+            t=t0;ro=lro;rd=lrd;alpha*=0.75;continue;
+        }
+
+        float r=distance(ro,originalPos);
+        float EPSILON=max(EPSILONS*r,EPSILON_MIN);
+        hit=o.d<=EPSILON&&o.d<=ld&&r<=Far;
+        if(r>Far||hit) break;
+        t0=t;lro=ro;lrd=rd;
+        ld=o.d;
+        o.d*=alpha;
+        t+=o.d;ro+=rd*o.d;
+    }
+    ro_o=ro;
+    rd_o=rd;
+    return hit?distance(ro0,ro):-1;
+}
+
+
+
+const float S_R=0.03125;
+const float cosD_S=1/sqrt(1+S_R*S_R);
+const vec3 b_P=vec3(30000);//atmosphere thickness
+const float b_k=0.25;//mix
+
+ 
+const vec3 Mie=vec3(0.2);
+
+const vec3 Rayleigh=2e10*pow(vec3(1./700,1./520,1./450),vec3(4));
+  
+const vec3 b_k0=mix(Rayleigh,Mie,b_k);
+
+const vec3 b_Q=b_k0/(b_P*b_P);//absorption
+const vec3 b_Sun=2*vec3(10,10,10);//sun color
+const vec3 b_g0=mix(Rayleigh*0.01,vec3(0.9),b_k);//single scatter
+vec4 background(in vec3 pos, in vec3 n,in vec3 lightDir ) {
+    vec3 n0=n;
+
+    n.y=max(n.y,1e-5);
+    vec3 g=3./(8.*PI)*(1.+pow(dot(n,lightDir),2.))*(1.-b_g0*b_g0)/(2.+b_g0*b_g0)/pow(1.+b_g0*b_g0-2.*b_g0*dot(lightDir,n),vec3(1.5));
+    vec3 t=b_Q*0.5*(b_P-pos.y)*(b_P-pos.y);
+    vec3 c=b_Sun*g*(exp(-t/n.y)-exp(-t/lightDir.y))/(n.y-lightDir.y)*max(lightDir.y,0.);
+
+    c+=exp(-t/n.y)*b_Sun*float(dot(n0,lightDir)>cosD_S);
+	 return vec4(c,1);
+}
+vec4 background(in vec3 pos, in vec3 n,in vec3 lightDir,float s,vec3 col ) {
+    vec3 n0=n;
+    if(n.y>0) s=min((b_P.x-pos.y)/n.y,s);
+    vec3 g=3./(8.*PI)*(1.+pow(dot(n,lightDir),2.))*(1.-b_g0*b_g0)/(2.+b_g0*b_g0)/pow(1.+b_g0*b_g0-2.*b_g0*dot(lightDir,n),vec3(1.5));
+    vec3 t=b_Q*0.5*(b_P-pos.y)*(b_P-pos.y);
+    vec3 s1=exp(b_Q*s*(0.5*s*n.y-(b_P-pos.y))*(1-n.y/lightDir.y));
+    vec3 c=b_Sun*g*exp(-t/lightDir.y)*(1-s1)/(-n.y+lightDir.y)*max(lightDir.y,0.);
+    c+=exp(b_Q*0.5*n.y*s*s-b_Q*(b_P-pos.y)*s)*col;
+	 return vec4(c,1);
+}
+
+
+vec4 background(in vec3 pos, in vec3 n,in vec3 lightDir,vec3 b_Q,vec3 b_P,vec3 b_Sun,vec3 b_g0) {
+    vec3 n0=n;
+
+    n.y=max(n.y,1e-5);
+    vec3 g=3./(8.*PI)*(1.+pow(dot(n,lightDir),2.))*(1.-b_g0*b_g0)/(2.+b_g0*b_g0)/pow(1.+b_g0*b_g0-2.*b_g0*dot(lightDir,n),vec3(1.5));
+    vec3 t=b_Q*0.5*(b_P-pos.y)*(b_P-pos.y);
+    vec3 c=b_Sun*g*(exp(-t/n.y)-exp(-t/lightDir.y))/(n.y-lightDir.y)*max(lightDir.y,0.);
+
+    c+=exp(-t/n.y)*b_Sun*float(dot(n0,lightDir)>cosD_S);
+	 return vec4(c,1);
+}
+float cloud_density(vec3 p){
+    float density=0.1+smoothstep(1000.,4000.,p.y)*smoothstep(4000.,20000.,p.y)*0.35;
+    float div_d=1/density;
+    return clamp(fbm3D2(0.0000125*p,4).x-1+density,0,1)*div_d;
+}
+
+vec4 sky( vec3 pos, vec3 n,vec3 lightDir,float Far){
+    return background(pos,n,lightDir);
+    const int step1=20;
+    const int step2=20;
+
+    vec3 c;
+    if(lightDir.y>5e-4){
+        float L=n.y<1e-2?Far:min((b_P.x-pos.y)/n.y,Far);
+        vec3 pos1=pos+n*L;
+        c=background(pos1,n,lightDir).xyz;
+        float s0=0;
+        for(int i=0;i<step1;i++){
+            float s= (n.y<5e-2?L/step1:(b_P.x-pos.y)/(n.y*step1))*(rand(pos1)+0.5);
+            s0+=s;
+            if(s0>L) break;
+            pos1-=n*s;
+            float d=cloud_density(pos1); 
+            const vec3 b_k1=mix(Rayleigh,Mie,0.9)*250/b_P/b_P;
+            vec3 b_Q1=mix(b_Q,b_k1,d);//absorption
+            const vec3 b_g1=mix(b_g0,vec3(0),d);
+            vec3 t=b_Q1*0.5*(2*(b_P-pos1.y)*s-s*s*n.y);
+            vec3 g=3./(8.*PI)*(1.+pow(dot(n,lightDir),2.))*(1.-b_g1*b_g1)/(2.+b_g1*b_g1)/pow(1.+b_g1*b_g1-2.*b_g1*dot(lightDir,n),vec3(1.5));
+            float s2=(b_P.x-pos1.y)/(lightDir.y*step2);
+            vec3 c1=b_Sun;
+            for(int j=0;j<step2;j++){
+                vec3 pos2=pos1+lightDir*(step2-j)*s2;
+                float d=cloud_density(pos2);
+                vec3 b_Q1=mix(b_Q,b_k1,d);//absorption
+                vec3 t=b_Q1*0.5*(2*(b_P-pos2.y)*s2-s2*s2*lightDir.y);
+                c1*=exp(-t);
+            }
+            c+=c1*g*b_Q1*(b_P-pos1.y-s*n.y)*s;
+            c*=exp(-t);
+        }
+    }else{
+        c=background(pos,n,lightDir).xyz;
+    }
+    
+    return vec4(c,1);
+}
+
+vec3 estimateNormal(vec3 pos) {
+    float EPSILON=max(EPSILONS*distance(pos,originalPos),EPSILON_MIN);
+    vec2 e = vec2(1.0,-1.0)*0.5773*EPSILON;
+    vec3 rd=vec3(0,0,0);
+    return normalize( e.xyy*DE( pos + e.xyy ,rd).d2 + 
+					  e.yyx*DE( pos + e.yyx ,rd).d2 + 
+					  e.yxy*DE( pos + e.yxy ,rd).d2 + 
+					  e.xxx*DE( pos + e.xxx ,rd).d2 );
+}
+
+
+
+
+
+vec2 Projection(vec2 p,float S){
+    #ifdef SphereProjection
+        if(length(p)==0) return p;
+        return normalize(p)*tan(length(p)*S);
+    #else
+        return p*S;
+    #endif
+}
+
+float N(float A,float x){
+    return sqrt(A/PI)*exp(-A*x*x);
+}
+float kernel(float x){
+    float s=0;
+    const float a=5.5,b=0.3,c=0.3,d=0.2;
+    for(int n=1;n<11;n++){
+        s+=N(exp(-pow(n,b)*a)*2e5,pow(x,d));
+    }
+    return max(pow(s,c)-0.2,0);
+}
+
+vec3 color(vec2 pos){
+    vec4 A=imageLoad(data_,ivec2(imageSize(data_)*(pos*0.5+0.5)));
+    if(iFrame==0.)
+        return vec3(0);
+    else
+        return max(A.xyz/max(A.w,0.01),0.);
+}
+vec3 bloom(vec2 pos){
+    if(iFrame<AA*AA/4) return vec3(0);
+    vec3 Calc=vec3(0);
+    const int S=32;
+    for(int i=0;i<S;i++){
+        float theta=16*PI*rand(pos);
+        const float A=1;
+        float r=rand(pos);
+        vec2 offset=vec2(cos(theta),sin(theta))*r*A;
+        vec3 C=color(pos);
+        vec3 sampleC=color(pos+offset);    
+        sampleC=sampleC*kernel(r)/kernel(0)*2;
+        Calc+=max(sampleC,C);
+    }
+    return Calc/S;
+}
+void XYZ(vec3 n,out vec3 X,out vec3 Y,out vec3 Z){
+    Y=n;
+    X=cross(n,vec3(0,1,0));
+    X=length(X)==0?vec3(1,0,0):normalize(X);
+    Z=cross(n,X);
+}
+vec3 sampleObjectLight(info A,vec3 center,float sR,int id){
+
+    
+    vec3 ro=A.p;
+    float d=distance(ro,center);
+    vec3 centerDir;
+    float cosD_S;
+    if(d<=sR){
+        cosD_S=-1;
+        centerDir=reflect(A.rd_i,A.n);
+    }else{
+        float RDivd=sR/d;
+        cosD_S=1/sqrt(1+RDivd*RDivd);
+        centerDir=normalize(center-ro);
+    }
+    vec3 X,Y,Z;
+    XYZ(centerDir,X,Y,Z);
+    
+    float r1=rand(ro);
+    float alpha=rand(ro)*2*PI;
+    float beta=acos(1-r1*(1-cosD_S));
+    
+    vec3 ro_o,rd_o;
+    
+    vec3 sampleDir=(cos(beta))*Y+sin(beta)*(cos(alpha)*X+sin(alpha)*Z);
+    
+    float t=raycast(ro,sampleDir,ro_o,rd_o);
+    if(t<-0.5) return vec3(0);
+    object oA=DE(ro_o,vec3(0));
+    vec3 light=Material(ro_o,estimateNormal(ro_o),oA).light;
+    
+    XYZ(A.n,X,Y,Z);
+    vec3 microNormal=normalize(sampleDir-A.rd_i);
+    beta=acos(clamp(dot(microNormal,Y),0,1));
+    alpha=0;
+    
+    vec4 rC=rColor(A.surface.Cs,dot(microNormal,-A.rd_i));
+    
+    float IoN=abs(dot(A.n,A.rd_i));
+    float OoN=abs(dot(A.n,sampleDir));
+    float IoH=abs(dot(microNormal,A.rd_i));
+    float weightA=HGGXpdf(beta,alpha,A.surface.R.x,A.surface.R.zw);
+    weightA*=HGGX_G2(IoN,OoN,A.surface.R.x,A.surface.R.zw);
+    float weightB=HGGXpdf(beta,alpha,A.surface.R.y,A.surface.R.zw);
+    weightB*=1/(1+HGGX_Lamda(OoN,A.surface.R.y,A.surface.R.zw));
+    
+    vec3 sampleColor=(weightA*A.surface.Cs*rC.xyz*A.surface.S.x*0.25/IoH
+                    +weightB*A.surface.Cd*(1-A.surface.S.x*rC.xyz))*max(OoN,0);
+    sampleColor*=light*100;
+    return sampleColor*(1-cosD_S);
+    
+}
+
+vec3 sampleSunlight(info A){
+
+
+    
+    vec3 X,Y,Z;
+    XYZ(lightDir,X,Y,Z);
+    
+    vec3 ro=A.p;
+    
+    float r1=rand(ro);
+    float alpha=rand(ro)*2*PI;
+    float beta=acos(1-r1*(1-cosD_S));
+    
+    vec3 ro_o,rd_o;
+    
+    vec3 sampleDir=(cos(beta))*Y+sin(beta)*(cos(alpha)*X+sin(alpha)*Z);
+    
+    float t=raycast(ro,-sampleDir,ro_o,rd_o);
+    if(t>-0.5) return vec3(0);
+    
+    vec3 sunlight=sky(ro,-sampleDir,-lightDir,500000).xyz;
+    
+    XYZ(A.n,X,Y,Z);
+    vec3 microNormal=-normalize(sampleDir+A.rd_i);
+    beta=acos(clamp(dot(microNormal,Y),0,1));
+    alpha=0;
+    float beta2=acos(clamp(-dot(sampleDir,A.n),0,1));
+    float alpha2=0;
+    vec4 rC=rColor(A.surface.Cs,dot(microNormal,-A.rd_i));
+    
+    float IoN=abs(dot(A.n,A.rd_i));
+    float OoN=abs(dot(A.n,sampleDir));
+    float IoH=abs(dot(microNormal,A.rd_i));
+    float weightA=HGGXpdf(beta,alpha,A.surface.R.x,A.surface.R.zw);
+    weightA*=HGGX_G2(IoN,OoN,A.surface.R.x,A.surface.R.zw);
+    float weightB=HGGXpdf(beta2,alpha2,A.surface.R.y,A.surface.R.zw);
+    weightB*=1/(1+HGGX_Lamda(OoN,A.surface.R.y,A.surface.R.zw));
+    
+    vec3 sampleColor=(weightA*A.surface.Cs*rC.xyz*A.surface.S.x
+                    +weightB*A.surface.Cd*(1-A.surface.S.x*rC.xyz))*0.25/IoH
+                    *max(-dot(microNormal,sampleDir),0)*max(OoN,0);
+    sampleColor*=sunlight*2;
+    return max(vec3(0),vec3(sampleColor)*(dot(sampleDir,lightDir)>cosD_S?1:0));
+    
+}
+vec3 getObjectLight(info A,vec3 ro,vec3 rd,vec3 n){
+    #ifdef EnableObjectLight
+        vec3 color=vec3(0);
+        int id=int(clamp(floor(hash13(ro)*ids.length()),0,ids.length()));
+        color+=sampleObjectLight(A,centers[id].xyz,centers[id].w,ids[id]);
+        color*=ids.length();
+        return max(color,0);
+    #else
+        return vec3(0);
+    #endif
+}
+
+float calcK(vec3 ro,float EPSILON){
+
+    //float EPSILON=max(EPSILONS*distance(ro,originalPos)*0,EPSILON_MIN*1);
+    
+    vec3 p=(vec3(1,1,1))*EPSILON;
+    vec3 q=(vec3(1,-1,-1))*EPSILON;
+    vec3 r=(vec3(-1,-1,1))*EPSILON;
+    vec3 s=(vec3(-1,1,-1))*EPSILON;
+    #define z0 vec3(0)
+    float s1=DE(ro+p+p,z0).d2;
+    float s2=DE(ro+p+q,z0).d2;
+    float s3=DE(ro+p+r,z0).d2;
+    float s4=DE(ro+p+s,z0).d2;
+    float s5=DE(ro+q+q,z0).d2;
+    float s6=DE(ro+q+r,z0).d2;
+    float s7=DE(ro+q+s,z0).d2;
+    float s8=DE(ro+r+r,z0).d2;
+    float s9=DE(ro+r+s,z0).d2;
+    float s10=DE(ro+s+s,z0).d2;
+    
+    mat3 H;
+    
+    vec3 p_=(vec3(1,1,1));
+    vec3 q_=(vec3(1,-1,-1));
+    vec3 r_=(vec3(-1,-1,1));
+    vec3 s_=(vec3(-1,1,-1));
+    
+    //Hessian
+    H[0]= (p_*(s1*p_+s2*q_+s3*r_+s4*s_).x
+           +q_*(s2*p_+s5*q_+s6*r_+s7*s_).x
+           +r_*(s3*p_+s6*q_+s8*r_+s9*s_).x
+           +s_*(s4*p_+s7*q_+s9*r_+s10*s_).x
+            );
+    H[1]= (p_*(s1*p_+s2*q_+s3*r_+s4*s_).y
+           +q_*(s2*p_+s5*q_+s6*r_+s7*s_).y
+           +r_*(s3*p_+s6*q_+s8*r_+s9*s_).y
+           +s_*(s4*p_+s7*q_+s9*r_+s10*s_).y
+            );
+    H[2]=  (p_*(s1*p_+s2*q_+s3*r_+s4*s_).z
+           +q_*(s2*p_+s5*q_+s6*r_+s7*s_).z
+           +r_*(s3*p_+s6*q_+s8*r_+s9*s_).z
+           +s_*(s4*p_+s7*q_+s9*r_+s10*s_).z
+            );
+    H/=2*EPSILON;
+    
+    vec3 dDE=(s1*p_+s5*q_+s8*r_+s10*s_);
+    mat4 K=mat4(H[0][0],H[1][0],H[2][0],dDE.x,
+                H[0][1],H[1][1],H[2][1],dDE.y,
+                H[0][2],H[1][2],H[2][2],dDE.z,
+                dDE.x,dDE.y,dDE.z,0
+                );
+    return -determinant(K)/pow(dot(dDE,dDE),2);
+  
+    /*vec3 dDE=s1*p+s5*q+s8*r+s10*s;
+    vec3 N=cross(n,dDE);
+    float t1=dot(p,N);
+    float t2=dot(q,N);
+    float t3=dot(r,N);
+    float t4=dot(s,N);
+    
+    float k=2/(dot(p,p)*pow(length(N),3));
+    k*=s1*t1*t1+s5*t2*t2+s8*t3*t3+s10*t4*t4
+        +2*(s2*t1*t2+s3*t1*t3+s4*t1*t4+s6*t2*t3+s7*t2*t4+s9*t3*t4);
+    return k*0.75;*/
+}
+vec3 Trace(vec3 ro,vec3 rd){
+    enablewater=true;
+    int count=0;
+    vec3 ro_i=ro,rd_i=rd,ro_o=ro,rd_o=rd;
+    object oA=DE(ro_i,vec3(0));object oB;
+    vec4 fogA=vec4(0);
+    vec3 absorbtion=vec3(1);
+    for(count=0;count<MaxRay;count++){
+        
+        fogA=InsideFog(ro_i,oA);
+        float t=raycast(ro_i,rd_i,ro_o,rd_o);
+        absorbtion=exp(-1e10*fogA.yzw);
+        if(t<-0.5) break;
+        ro_i=ro_o;
+        rd_i=rd_o;
+        
+        absorbtion=exp(-t*fogA.yzw);
+        
+        float EPSILON=EPSILONS*distance(ro_o,originalPos);
+        vec3 normal=estimateNormal(ro_o);
+        normal=faceforward(normal,normal,rd_i);
+        
+        vec3 ro_B=ro_o-normal*EPSILON*2;
+        
+        oA=DE(ro_o,vec3(0));
+        oB=DE(ro_B,vec3(0));
+        
+        vec4 mA=InsideMaterial(ro_o,oA);
+        vec4 mB=InsideMaterial(ro_B,oB);
+        
+        material surface=Material(ro_o,normal,oA);
+        
+        vec3 microNormal;
+        vec3 microNormal2;
+        int i=0;
+        vec2 g=surface.R.zw;
+        
+        do{
+            microNormal=HGGXNormal(normal,surface.R.x,g,ro_o);
+            rd_o=reflect(rd_i,microNormal);
+            i++;
+        }while(i<64&&dot(rd_o,normal)<0);
+        vec3 rd_o2;
+
+        microNormal2=HGGXNormal(normal,surface.R.y,g,ro_o);
+        rd_o2=reflect(rd_i,microNormal2);
+
+        float rs=mA.x/mB.x;
+        vec3 rd_refract=refract(rd_i,microNormal2,rs);
+        float F=fresnel(-rd_i,microNormal,1/rs);
+        
+        float IoH=dot(rd_o,microNormal);
+        vec4 rC=rColor(surface.Cs,IoH);
+        
+        float p=mixp(rC.w,surface.S.x);
+        
+        info A;
+        A.rd_i=rd_i;A.n=normal;A.p=ro_o;
+        A.n_i=mA.x;
+        A.o=oA;A.surface=surface;
+        
+        A.rC=rC;
+        A.distance=t;
+        bool refract_;
+        vec3 I;
+
+        float IoN=dot(rd_i,normal);
+        float OoN;
+        bool b=rand(ro_o)<p;
+        bool r=rand(ro_o)<(1-F);
+        A.sampleRoughness=b?surface.R.x:surface.R.y;
+        if(b){
+            I=rC.rgb*(1+(surface.S.x-1)*rC.w)/max(rC.w,1e-5);
+            A.n_o=mA.x;
+            OoN=dot(rd_o,normal);
+            I*=HGGX_G2(IoN,OoN,surface.R.x,g);
+            A.microNormal=microNormal;
+        }else{
+            
+            I=surface.Cd*(1+(surface.S.x-1)*rC.w)/max(1-rC.w,1e-5)*(1-surface.S.x*rC.rgb);
+            refract_=rand(ro_o)<surface.S.y;
+            
+            vec3 microNormal3=microNormal2;
+            
+            
+            A.n_o=refract_&&r?mB.x:mA.x;
+            rd_o2=refract_?(r?rd_refract:reflect(rd_i,microNormal3)):microNormal2;
+            if(rd_refract==vec3(0)&&refract_){
+                int i=0;
+                do{
+                    microNormal3=HGGXNormal(normal,surface.R.y,g,ro_o);
+                    rd_o2=reflect(rd_i,microNormal3);
+                    i++;
+                }while(i<64&&dot(rd_o2,normal)<0);
+            }
+            ro_o=refract_&&rd_refract!=vec3(0)?(r?ro_B:ro_o):ro_o;
+            rd_o=rd_o2;
+            IoH=dot(rd_o,microNormal3);
+            OoN=dot(rd_o,normal);
+            I*=refract_?1:1/(1+HGGX_Lamda(OoN,surface.R.y,g));
+            A.microNormal=microNormal3;
+
+        }
+        
+        A.rd_o=rd_o;
+        float OoH=dot(rd_o,-A.microNormal);
+        float correction=A.n_o*IoH/(A.n_i*OoH);
+        
+        
+        correction*=correction;
+        #ifdef Correction
+        I*=correction;
+        #endif
+        A.color=I;
+        A.absorbtion=absorbtion;
+        infos[count]=A;
+        ro_i=ro_o;rd_i=rd_o;
+        
+        oA=refract_&&r?oB:oA;
+        
+        if(count>3&&rand(ro_o)<0.1) break;
+
+    }
+    count-=1;
+    vec3 c=float(count<MaxRay-1)*sky(ro_o,rd_o,-lightDir,5000000).xyz*absorbtion;
+    vec3 back=sky(originalPos,rd_o,-lightDir,5000000).xyz*absorbtion;
+    if(count==-1) return back;
+    
+    int j0=-1,j1=-1;float p_0=0,p_1=0;
+    float A=0;
+    vec3 directLight0[MaxRay];
+    
+    vec3 c0=vec3(1);
+    for(int i=0;i<count;i++) {
+        infos[i].sampleRoughness*=pow(luma(c0)/pow(i+1,1),0.5);
+        c0*=infos[i].color;
+    }
+    
+    
+    for(int i=count;i>=0;i--) {
+        A+=infos[i].sampleRoughness*infos[i].sampleRoughness;
+        directLight0[i]=vec3(0);
+    }
+    float A_0=A;
+    //sample sun and objects
+
+    if(A>0){
+        bool a=true;
+        bool c0=true,c1=true;
+        for(int i=count;i>=0&&a;i--){
+            float p=infos[i].sampleRoughness*infos[i].sampleRoughness/A;
+            bool b0=rand(ro_o)<p&&c0;
+            j0=b0?i:j0;p_0=b0?p:p_0;
+            c0=b0?false:c0;
+            b0=rand(ro_o)<p&&c1;
+            j1=b0?i:j1;p_1=b0?p:p_1;
+            c1=b0?false:c1;
+            a=c0||c1;
+            A-=infos[i].sampleRoughness*infos[i].sampleRoughness;
+        }
+    }
+    enablewater=false;
+    if(j0>=0){
+        vec3 sunL=sampleSunlight(infos[j0]);
+        directLight0[j0]+=sunL/p_0;
+    }
+    if(j1>=0){
+        vec3 objL=getObjectLight(infos[j1],infos[j1].p,infos[j1].rd_i,infos[j1].n);
+        directLight0[j1]+=objL/p_1;
+    }
+    
+    for(int i=count;i>=0;i--){
+        /*c=sky(infos[i].p,infos[i].rd_o,-lightDir,infos[i].distance,c).xyz*infos[i].color
+            +directLight0[i]+infos[i].surface.light;*/
+        
+        c=c*infos[i].color+directLight0[i]+infos[i].surface.light;
+        c=infos[i].absorbtion*background(infos[i].p,infos[i].rd_i,-lightDir,infos[i].distance*FogS,c).xyz;
+    }
+    return c;
+}
+vec3 sampleD(ivec2 lp){
+    int N=int(imageLoad(data_,ivec2(lp)).w);
+    return (imageLoad(data_2,ivec2(lp)).xyz/N-pow(imageLoad(data_,ivec2(lp)).xyz/N,vec3(2)));
+}
+ivec2 clampP(ivec2 p,ivec2 size){
+    vec2 A=(vec2(-HdivW,HdivW)*0.5+0.5)*size.y;
+    return ivec2(clamp(p.x,0,size.x-1),clamp(p.y,A.x,A.y));
+}
+void blur(vec3 rd){
+    vec3 A=max(vec3(0),sampleD(lp));
+    vec3 c=vec3(0);
+    vec3 omega=vec3(0);
+    vec3 n=imageLoad(data_3,lp).xyz;
+    if(length(n)<0.5){
+        imageStore(output_,lp,imageLoad(data_,lp));return;
+    }
+    vec3 X;vec3 Y;vec3 Z;
+    XYZ(n,X,Y,Z);
+
+    float r0=0.04*1024/imageSize(data_).x;
+    const int samples=2048;
+    for(int i=0;i<samples;i++){
+        vec3 r=-log(hash32(lp+iFrame*0.34+c.xy+i)*0.9+0.1)*log(A+1)*r0;
+        vec3 theta=hash32(lp+iFrame*0.4+c.yz+0.52+i)*32*PI;
+        
+        vec3 x0,y0;
+        vec3 r1=r.x*(cos(theta)*X+sin(theta)*Z);
+        x0.x=dot(r1,rd_X);y0.x=dot(r1,rd_Z);
+        vec3 r2=r.y*(cos(theta)*X+sin(theta)*Z);
+        x0.y=dot(r2,rd_X);y0.y=dot(r2,rd_Z);
+        vec3 r3=r.z*(cos(theta)*X+sin(theta)*Z);
+        x0.z=dot(r3,rd_X);y0.z=dot(r3,rd_Z);
+        x0*=imageSize(data_).x;y0*=imageSize(data_).y;
+
+        ivec2 size=imageSize(data_);
+        float s1=imageLoad(data_,clampP(lp+ivec2(x0.x,y0.x),size)).x;
+        vec3 n1=imageLoad(data_3,clampP(lp+ivec2(x0.x,y0.x),size)).xyz;
+        float s2=imageLoad(data_,clampP(lp+ivec2(x0.y,y0.y),size)).y;
+        vec3 n2=imageLoad(data_3,clampP(lp+ivec2(x0.x,y0.x),size)).xyz;
+        float s3=imageLoad(data_,clampP(lp+ivec2(x0.z,y0.z),size)).z;
+        vec3 n3=imageLoad(data_3,clampP(lp+ivec2(x0.x,y0.x),size)).xyz;
+
+        vec3 K;
+        K.x=max(dot(n,n1),0);
+        K.y=max(dot(n,n1),0);
+        K.z=max(dot(n,n1),0);
+        
+        c+=vec3(s1,s2,s3)*K;
+        omega+=K;
+    }
+    c/=omega;
+    vec3 original=imageLoad(data_,lp).xyz;
+    omega/=samples;
+    c=original*(1-omega)+c*omega;
+    imageStore(output_,lp,vec4(abs(c),imageLoad(data_,lp).w));
+}
+void F(float x,float y){
+    if(abs(y)>HdivW) {Store(vec4(0,0,0,1));return;}
+    
+    if(iFrame<AA*AA){
+        float x0=mod(iFrame,AA)/AA;
+        float y0=floor(iFrame/AA)/AA;
+        x+=1.0/iW*x0;
+        y+=1.0/iW*y0;
+    }
+    infos[0].n=vec3(0);
+
+    //set camera
+    vec3 rawN=vec3(Projection(vec2(x,y),FOV),1);
+    vec3 n=normalize((Eye_Mat*vec4(rawN,0)).xyz);
+    rd_X=normalize((Eye_Mat*vec4(cross(rawN,vec3(0,1,0)),0)).xyz);
+    rd_Z=normalize(cross(n,rd_X));
+    vec3 n_m=normalize((Eye_Mat*vec4(Projection(DOF_Pos,FOV),1,0)).xyz);
+    vec3 pos=Position;
+    //denoise
+    #if 1
+    if(iFrame>=AA*AA&&iFrame<=AA*AA&&ifOutputBigImage==0){
+        blur(n);
+        vec3 tc=imageLoad(output_,ivec2(lp)).xyz/imageLoad(output_,ivec2(lp)).w;
+        tc=ACESFilm(tc);tc=pow(tc,vec3(1/gamma));
+        Store(vec4(tc,1));
+    }
+    #endif
+    if(iFrame>=AA*AA) {return;}
+    float DOF=0.1;
+    vec3 tmp1,tmp2;
+    if(DOF_R>0) DOF=raycast(pos,n_m,tmp1,tmp2);
+    if(DOF<-0.5) DOF=Far;
+    vec3 Q=pos+n*DOF;
+    vec3 X;X.y=-length(n.xz);
+    vec3 Y;Y.xz=(float(length(n.xz)==0)*vec2(1,0)+normalize(n.xz))*n.y;
+    Y=cross(n,X);float tmp_1=rand(pos+vec3(x,iFrame,y))*2*PI;
+    float tmp_2=rand(pos+vec3(x,iFrame,y+5));
+    n=normalize(n+tmp_2*DOF_R/DOF*(X*sin(tmp_1)+Y*cos(tmp_1)));
+    pos=Q-DOF*n;
+    
+    originalPos=pos;
+    globalTime=rand(pos+n);
+    
+    vec3 tcolor=Trace(pos,n);
+    tcolor=clamp(tcolor,0,8);
+    if(ifOutputBigImage==0){
+        vec3 bloom=bloom(vec2(x,y));
+        tcolor=max(tcolor,bloom);
+    }
+    if(iFrame<=1){
+        imageStore(data_,ivec2(lp),vec4(tcolor,1));
+        imageStore(data_2,ivec2(lp),vec4(tcolor*tcolor,1));
+    }else{
+        vec4 temp0=imageLoad(data_,ivec2(lp));
+        imageStore(data_,ivec2(lp),temp0+vec4(tcolor,1));
+        temp0=imageLoad(data_2,ivec2(lp));
+        imageStore(data_2,ivec2(lp),temp0+vec4(tcolor*tcolor,1));
+    
+    }
+    vec3 tc=imageLoad(data_,ivec2(lp)).xyz/imageLoad(data_,ivec2(lp)).w;
+    
+    if(ifOutputRAW==0){
+        tc=ACESFilm(tc);tc=pow(tc,vec3(1/gamma));
+    }
+    #if 0
+    int N=int(imageLoad(data_,ivec2(lp)).w);
+    tc=(imageLoad(data_2,ivec2(lp)).xyz/N-pow(imageLoad(data_,ivec2(lp)).xyz/N,vec3(2)));
+    #endif
+    imageStore(data_3,lp,vec4(infos[0].n,0));
+    Store(vec4(tc,1));
+}

@@ -1,0 +1,35 @@
+#version 430 core
+layout (local_size_x=####,local_size_y=####) in;//#### means default pixel(or workspace) size
+
+#include "common.nml"
+
+layout (binding=0) uniform sampler2D iChannel0;
+layout (binding=1) uniform sampler2D iChannel1;
+layout (binding=2) uniform sampler2D iChannel2;
+layout (binding=3) uniform sampler3D iChannel3;
+
+//Shadertoy Support
+vec4 FragCoord;
+vec2 iResolution;
+vec4 iMouse;
+#define gl_FragCoord FragCoord
+
+const float HdivW0=1;
+vec2 UV0(vec2 uv){
+    return vec2(uv.x,(uv.y-0.5)*HdivW0+0.5);
+}
+
+#include "Shadertoy-bufferB.nml"
+
+//Entry
+const float HdivW=1;
+void F(float x,float y){
+    if(abs(y)>HdivW) {Store(vec4(0));return;}
+    vec4 fragColor;
+    FragCoord.xy=vec2(x,y)*0.5+0.5;
+    iResolution=vec2(iW,iH);
+    iMouse.xy=iResolution*(0.5*Position2D.xy+0.5);
+    iMouse.z=mouse.z;
+    mainImage(fragColor,lp-vec2(0,iW*(0.5-0.5*HdivW))+float(ifOutputBigImage)*vec2(0,iOffset)*iH);
+    Store(fragColor);
+}

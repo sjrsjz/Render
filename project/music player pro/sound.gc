@@ -1,0 +1,37 @@
+#version 430 core
+layout (local_size_x=256) in;
+layout (rgba32f,binding=0) uniform image1D sound_;
+layout (binding=0) uniform sampler1D fft_;
+
+uniform float iTime;
+int lp;
+uniform int iFrame;
+void F(float x);
+vec4 Load(int pos){
+    return imageLoad(sound_,pos);
+}
+void Store(int pos,vec4 data0){
+    imageStore(sound_,pos,data0);
+}
+vec4 Load(){
+    return imageLoad(sound_,lp);
+}
+void Store(vec4 data0){
+    imageStore(sound_,lp,data0);
+}
+void main(){
+    lp=int(gl_GlobalInvocationID.x);
+    Store(lp,Load(lp));
+    F(lp.x/float(2048));
+}
+
+#include "common.nml"
+
+void F(float x){
+    if(iFrame<=1) {Store(vec4(0));return;}
+    float strength=length(texture(fft_,pow(abs(x),2)).rg)*10;
+    vec4 a=Load();
+    a.z=a.x*exp(-pow(iTime-a.y+0.5,5)*2);
+    if(a.z<=strength){a.y=iTime;a.x=strength;}
+    Store(a);
+}

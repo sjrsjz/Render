@@ -1,0 +1,144 @@
+uniform vec3 SunLightDir=vec3(2,-1,-1);
+vec3 lightDir=normalize(SunLightDir);//Sun light direction
+
+
+
+// value noise, and its analytical derivatives
+
+float terrainH2( in vec2 x )
+{
+	vec2  p = x*0.003/SC;
+    float a = 0.0;
+    float b = 1.0;
+	vec2  d = vec2(0.0);
+    for( int i=0; i<21; i++ )
+    {
+        vec3 n = noised(p);
+        d += n.yz;
+        a += b*n.x/(1.0+dot(d,d));
+        b *= 0.5;
+        p = m3*p*2.0+vec2(0.2,1);
+    }
+
+    #if USE_SMOOTH_NOISE==1
+    a *= 0.9;
+    #endif
+	return SC*120.0*a;
+}
+
+float terrainL2( in vec2 x )
+{
+	vec2  p = x*0.003/SC;
+    float a = 0.0;
+    float b = 1.0;
+	vec2  d = vec2(0.0);
+    for( int i=0; i<5; i++ )
+    {
+        vec3 n = noised(p);
+        d += n.yz;
+        a += b*n.x/(1.0+dot(d,d));
+		b *= 0.5;
+        p = m3*p*2.0+vec2(1,25);
+    }
+
+    #if USE_SMOOTH_NOISE==1
+    a *= 0.9;
+    #endif
+	return SC*120.0*a;
+}
+
+
+
+vec3 DE1(vec3 pos) {
+    //pos+=vec3(-45,-48.5,-2000);
+    float h=pos.y+450-0.075*terrainH2(10*pos.xz)-exp(-length(pos.xz)*0.00025)*500;
+    return vec3(5,h,1);
+}
+
+object DE(vec3 pos,vec3 rd) {
+    object hit0=newObj(Far,Far,-1,-1,0);
+    vec3 pos0=pos;
+   
+    pos.y+=60;pos.zx-=100;
+    if(enablewater) hit0=near(hit0,vec3(2,(pos.y+15+0.000025*terrainL(pos.xz*3000)),3));
+    hit0=near(hit0,DE1(pos*0.5));
+
+    return hit0;
+}
+
+float fbm2( vec2 p )
+{
+    return fbm(p)*0.5+fbm(p*5)*0.25+fbm(p*20)*0.25;
+}
+float snow_S(vec3 n,vec3 w,vec3 g,float a){
+    float tanA=sqrt(max(pow(abs(dot(n,w)),-2)-1,0));
+    float tanB=sqrt(max(pow(abs(dot(n,g)),-2)-1,0));
+    float a2=a*a;
+    float t=sqrt(tanB*tanB+a2);
+    return (float(dot(n,g)<0)*2*a2/
+        ((1+sqrt(1+a2*tanA*tanA))*(tanB+t)*t));
+}
+float calcK(vec3 p,float e);
+vec3 mcolor(vec3 p,vec3 n,out vec4 s0){
+    float t=p.y*1.5+20;
+    vec3 c=vec3(0.1,0.1,0.12)*(fbm2(p.xz*0.2)*0.3+1);
+    vec3 dirt=mix(vec3(0.55,0.35,0.25),vec3(0.55,0.35,0.25)*1.5,fbm2(p.xz*0.01)+fbm(p.xz*0.1)*0.4);
+    float snow_S=clamp((400)*0.00625*snow_S(n,normalize(vec3(0,1,0)),vec3(0,-1,0),0.9),0,1);
+    snow_S*=max(0,1+500*calcK(p,1));
+    c=mix(vec3(0.11,0.12,0.1),c,smoothstep(-60,-20,t+fbm(p.xz*0.05)*50));
+    vec3 grass0=0.3*mix(vec3(41,166,6)/255,vec3(145,163,26)/255,clamp(fbm3D(p*0.025,7).x,0,1));
+    vec3 grass=mix(dirt,grass0,clamp(smoothstep(-75,-150,t)*0.5+fbm2(p.xz*0.5),0,1));
+    c=mix(grass,c,smoothstep(-fbm2(m3*p.xz*0.1)*500,0.,t));    
+    float s=clamp(smoothstep(-200,100+fbm2(p.xz*0.1)*100,t+125)*snow_S,0,1);
+   
+    s0=vec4(s);
+    c=mix(c,vec3(0),s);
+    return c;
+}
+material newMaterial(vec3 Cs,vec3 Cd,vec2 S,vec4 R,vec3 light){
+    material a;a.Cs=Cs;a.Cd=Cd;a.S=S;a.R=R;a.light=light;return a;
+}
+material Material(vec3 pos,vec3 nor,object o){
+
+    if(o.id==2) return newMaterial(vec3(0),vec3(1),vec2(0,1),vec4(0,0,2,1.9),vec3(0));
+    if(o.id==3) return newMaterial(vec3(0.2),vec3(0.3),vec2(1,0),vec4(0.1,0.2,2,1.9),vec3(0));
+
+    if(o.id==5) {
+        vec4 s=vec4(0);
+       // pos*=0.1;
+       pos.y-=1400;
+        vec3 c=mcolor(pos*0.25+vec3(0,225+fbm(pos.xz*0.02)*125,0),nor,s);
+        return newMaterial(s.xyz,c,vec2(s.w,0),vec4(1,1,2,1.9),vec3(0));
+    
+    }
+    return newMaterial(vec3(1),vec3(1),vec2(1,0),vec4(0,1,2,1.9),vec3(0));
+}
+
+vec4 InsideMaterial(vec3 pos,object o){
+    if(o.i_id==1) return vec4(1,0,0,0);
+    if(o.i_id==3) return vec4(1.331,0,0,0);
+
+    return vec4(1,vec3(0));
+}
+vec4 InsideFog(vec3 pos,object o){
+    if(o.i_id==3) return vec4(0,0.06,0.052,0.055);
+    return vec4(0);
+}
+
+//#define EnableObjectLight
+
+#ifdef EnableObjectLight
+vec4 centers[1]={{0,0,0,1}};
+int ids[1]={1};
+#endif
+vec4 getObjectLight(vec3 ro,vec3 rd,vec3 n){
+    #ifdef EnableObjectLight
+        vec4 color=vec4(0);
+        int id=int(clamp(floor(hash13(ro)*ids.length()),0,ids.length()));
+        color+=ObjectLight(ro,rd,n,centers[id].xyz,centers[id].w,ids[id]);
+        color.w*=ids.length();
+        return max(color,0);
+    #else
+        return vec4(0);
+    #endif
+}

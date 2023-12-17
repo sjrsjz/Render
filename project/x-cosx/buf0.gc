@@ -1,0 +1,115 @@
+#version 430 core
+layout (local_size_x=####,local_size_y=####) in;//#### means default pixel(or workspace) size
+layout (rgba32f,binding=0) uniform image2D input_;
+layout (rgba32f,binding=1) uniform image2D output_;
+layout (rgba32f,binding=2) uniform image2D data_;
+uniform float iTime,scale,dt;
+uniform int iFrame,iOffset,iW,iH;
+uniform vec4 Position2D;
+uniform vec3 RGB,RGB2;
+ivec2 lp;
+void F(float x,float y);
+vec4 Load(ivec2 pos){
+    return imageLoad(input_,pos);
+}
+void Store(ivec2 pos,vec4 data0){
+    imageStore(output_,pos,data0);
+}
+vec4 Load(){
+    return imageLoad(input_,lp);
+}
+void Store(vec4 data0){
+    imageStore(output_,lp,data0);
+}
+void main(){
+    lp=ivec2(gl_GlobalInvocationID.xy);
+    Store(lp,Load(lp));
+    F(2.0*(lp.x/float(iW)-0.5),2.0*((lp.y+iOffset*iH)/float(iW)-0.5));
+}
+
+#include "common.nml"
+
+void Edge(){
+    vec4 a[5];float d00;
+    a[0]=Load(lp+ivec2(-1,0));
+    a[1]=Load(lp+ivec2(1,0));
+    a[2]=Load(lp+ivec2(0,-1));
+    a[3]=Load(lp+ivec2(0,1));
+    a[4]=Load();
+    d00=length(abs(a[0]+a[1]-2*a[4])+abs(a[2]+a[3]-2*a[4]));//Laplacian
+    a[4].z=(d00<=0.1?1:0);
+    imageStore(data_,lp,a[4]);
+}
+void DSSAA(){
+    vec4 a[5],b[5];float d00;
+    a[0]=imageLoad(data_,lp+ivec2(-1,0));
+    a[1]=imageLoad(data_,lp+ivec2(1,0));
+    a[2]=imageLoad(data_,lp+ivec2(0,-1));
+    a[3]=imageLoad(data_,lp+ivec2(0,1));
+    a[4]=imageLoad(data_,lp);
+    b[0]=Load(lp+ivec2(-1,0));
+    b[1]=Load(lp+ivec2(1,0));
+    b[2]=Load(lp+ivec2(0,-1));
+    b[3]=Load(lp+ivec2(0,1));
+    b[4]=Load();
+    vec4 c=vec4(0);float S=0;
+    if(a[0].z==1){c+=b[0];S++;}
+    if(a[1].z==1){c+=b[1];S++;}
+    if(a[2].z==1){c+=b[2];S++;}
+    if(a[3].z==1){c+=b[3];S++;}
+    Store((b[4]+c)/(1+S));
+}
+const float PI=3.14159265358;
+vec2 rot(vec2 a,float theata){
+    return a.xx*vec2(cos(theata),sin(theata))+a.yy*vec2(-sin(theata),cos(theata));
+}
+vec3 rot(vec3 a,vec3 range){
+    a.yz=rot(a.yz,range.x);
+    a.xz=rot(a.xz,range.y);
+    a.xy=rot(a.xy,range.z);
+    return a; 
+}
+vec2 rotClamp(vec2 pos,int n){
+    float alpha=-atan(pos.x,pos.y);
+    float tmp=PI/n;
+    return abs(rot(pos,-alpha+mod(alpha,2*tmp)-tmp));
+}
+vec2 f( vec2 z, vec2 c )
+{
+    return z-cCos(z)-vec2(sin(iTime)*PI/2*0-PI/2,0);
+}
+
+vec2 df( vec2 z, vec2 c )
+{
+	vec2 e = vec2(0.001,0.0);
+    return cDiv( f(z,c) - f(z+e,c), e );
+}
+
+
+vec4 color(vec2 pos){
+    vec2 s=f(pos,vec2(0));
+    float k=length(s)/length(df(pos,vec2(0)));
+    
+    return vec4(vec3(k<0.0025*scale),1)+vec4(vec3(0,abs(PI/2-length(pos))<0.0025*scale,0),0);//vec4(ToRGB(float(i),dot(z1,z1)*float(i<=S),RGB,RGB2),1);
+}
+const int SSAA=32;
+void F(float x,float y){
+
+    if(abs(y)>1) return;
+    if(iFrame<=0){ Store(vec4(0,0,0,1));return;}
+    //if(iFrame>SSAA*SSAA) return;
+    //float x0=mod(iFrame,SSAA)/SSAA;
+    //float y0=floor(iFrame/SSAA)/SSAA;
+    //x+=1.0/iW*x0;
+    //y+=1.0/iW*y0;
+
+    vec2 p=Position2D.xy+vec2(x,y)*scale;
+    vec3 tcolor=color(p).xyz+vec3(0,abs(p.x)<scale*0.001,0)+vec3(abs(p.y)<scale*0.001,0,0)+vec3(0,0,float(fract(p.x)<scale*0.0025||fract(p.y)<scale*0.0025));
+    //if(iFrame<=1){
+        Store(max(Load(),vec4(tcolor,1)));
+    Store(vec4(vec3(cDiv(cLog(f(p,vec2(0))),vec2(0,2*PI)),0)+vec3(0,abs(p.x)<scale*0.001,0)+vec3(abs(p.y)<scale*0.001,0,0)+vec3(0,0,float(fract(p.x)<scale*0.0025||fract(p.y)<scale*0.0025)),1));
+    
+    //}else{
+     //   vec4 temp0=Load(lp);Store(lp,(temp0*iFrame+vec4(tcolor,1))/(iFrame+1));
+    //}
+}
