@@ -1,0 +1,31 @@
+#version 430 core
+layout (local_size_x=8,local_size_y=8,local_size_z=8) in;//#### means default pixel(or workspace) size
+layout (rgba32f,binding=0) uniform image3D data_;
+
+uniform int iFrame=0;
+#include "common.nml"
+#include "Model.nml"
+
+vec3 estimateNormal(vec3 pos) {
+    float EPSILON=0.005;
+    vec2 e = vec2(1.0,-1.0)*0.5773*EPSILON;
+    return normalize( e.xyy*DE( pos + e.xyy ).d2 + 
+					  e.yyx*DE( pos + e.yyx ).d2 + 
+					  e.yxy*DE( pos + e.yxy ).d2 + 
+					  e.xxx*DE( pos + e.xxx ).d2 );
+}
+void main(){
+    ivec3 lp=ivec3(gl_GlobalInvocationID.xyz);
+    if(iFrame==0){
+        vec3 p=vec3(lp-imageSize(data_)/2+0.5)/(imageSize(data_)-1)*2;
+        imageStore(data_,lp,vec4(float(DE(p).s)));
+    }else{
+        vec4 info=imageLoad(data_,lp).wzyx;
+        if(info.x<0.5) return;
+        vec3 p=info.yzw;
+        vec3 n=estimateNormal(p);
+        float d=DE(p).d2*0.5;
+        p-=n*d;
+        imageStore(data_,lp,vec4(p.zyx,0));
+    }
+}

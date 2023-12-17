@@ -1,0 +1,60 @@
+float rand(vec2 pos){
+    return fract(sin(dot(pos.xy*0.123 ,vec2(12.9898,78.233))) * 43758.5453);
+}
+struct object{
+    float d;float d2;int id;int i_id;int s;
+};
+float mix2(float A,float B,float x){
+    return (B-A)*x+A;
+}
+object newObj(float d,float d2,int id,int i_id,int s){
+    object o;o.d=d;o.d2=d2;o.id=id;o.i_id=i_id;o.s=s;
+    return o;
+}
+object near(object A,vec3 B){
+    object c;
+    c.d2=A.d>abs(B.y)?B.y:A.d2;
+    float tmp=mix2(A.i_id,B.z,float(B.y<0));
+    c.s=A.s+int(B.y<0);
+    B.y=abs(B.y);
+    c.id=int(mix2(A.id,B.x,float(A.d>B.y)));
+    c.d=min(A.d,B.y);
+    c.i_id=int(tmp);
+    return c;
+}
+
+vec2 cMul(vec2 a, vec2 b) {
+	return vec2(a.x*b.x-a.y*b.y,a.x*b.y+a.y*b.x);
+}
+vec2 cLog(vec2 a) {
+	float b =  atan(a.y,a.x);
+	if (b<0.0) b+=2.0*3.1415926535;
+	return vec2(log(length(a)),b);
+}
+vec2 cExp(vec2 z) {
+	return exp(z.x) * vec2(cos(z.y), sin(z.y));
+}
+vec2 cPow(vec2 z, vec2 a) {
+	return cExp(cMul(cLog(z), a));
+}
+vec2 cDiv(vec2 a, vec2 b){
+  float d = dot(b,b);
+  return vec2(dot(a,b),a.y*b.x-a.x*b.y)/d;
+}
+
+
+const float PI=3.14159265358;
+vec2 rot(vec2 a,float theata){
+    return a.xx*vec2(cos(theata),sin(theata))+a.yy*vec2(-sin(theata),cos(theata));
+}
+vec3 rot(vec3 a,vec3 range){
+    a.yz=rot(a.yz,range.x);
+    a.xz=rot(a.xz,range.y);
+    a.xy=rot(a.xy,range.z);
+    return a; 
+}
+vec2 rotClamp(vec2 pos,int n){
+    float alpha=-atan(pos.x,pos.y);
+    float tmp=PI/n;
+    return abs(rot(pos,-alpha+mod(alpha,2*tmp)-tmp));
+}

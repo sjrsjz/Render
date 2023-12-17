@@ -1,0 +1,73 @@
+##include<"include.ml">;
+Shader_Main{
+    N:buf0;N:Frame;
+    N:buf0_s;
+    N:SizeW;N:SizeH;N:SizeL;
+    var_update(N:name)->N:={
+    }
+    max(R:A,R:B)->R:={
+        if(A>B){return(A)};return(B)
+    }
+    Update()->N:={
+        Frame=Frame+1;
+        
+        N:Step=64;
+        if(Frame>=Step){
+            if(Frame==Step){
+                    print(&"Finish
+");
+                    PushMashData();
+                    UpdateMash()
+            }
+        }{
+            vec4:dim;
+            print(&"Marching...
+");
+            TexMash(&buf0);
+            TexLWH(buf0,dim);
+            N:size0=max(1,dim.x/8);
+            N:size1=max(1,dim.y/8);
+            N:size2=max(1,dim.z/8);
+            Shader(buf0_s);
+            Buf(buf0,0);
+            setI(&"iFrame",Frame);
+            compute(size0,size1,size2);
+            Shader(0);
+            GetTexMash(buf0)
+        };
+    }
+    frame_start()->N:={
+        Update()
+    }
+    frame_update()->N:={
+        return(1);/*if zero,then keep updating*/
+    }
+    frame_end()->N:={
+        return(0);/*return the texture/buffer which you want to display*/
+    }
+    shader_start()->N:={
+        Frame=0;
+        SizeW=128+64;SizeH=SizeW;SizeL=SizeW;
+        if(ifOutputBigImage!=0){
+            SizeH=DefaultLineSize*DefaultPixelSize;
+        };
+        buf0=buffer3D(SizeL,SizeW,SizeH);
+        buf0_s=getShader(&"buf0");
+    
+    
+        Shader(buf0_s);
+        N:size0=max(1,SizeL/8);
+        N:size1=max(1,SizeW/8);
+        N:size2=max(1,SizeH/8);
+        Buf(buf0,0);
+        setI(&"iFrame",0);
+        compute(size0,size1,size2);
+        Shader(0);
+        ClearMashData();
+        BuildUpMash(buf0);
+    
+    }
+    shader_end()->N:={
+        freeTex(buf0);
+    }
+}

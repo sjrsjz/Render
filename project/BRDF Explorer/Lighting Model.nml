@@ -1,0 +1,36 @@
+float HGGX_Lamda(float VoN,float a,vec2 g){
+    float tan2=1./(VoN*VoN)-1;
+    vec2 A=sqrt(1+g*a*a*tan2);
+    return (log((1+A.y)/(1+A.x))-A.y+A.x)/log(g.x/g.y);
+}
+
+float HGGX_G2(float VoN,float LoN,float a,vec2 g){
+    float L1=HGGX_Lamda(VoN,a,g);float L2=HGGX_Lamda(LoN,a,g);
+    return clamp((1.+L1)/(1+L2+L1),0,1);
+}
+vec3 HGGXNormal(vec3 normal,float roughness,vec2 g,vec3 pos){
+    vec3 randN0;randN0.y=-length(normal.xz);
+    if(length(normal.xz)<=0)
+        randN0.xz=vec2(1,0);
+    else
+        randN0.xz=normalize(normal.xz)*normal.y;
+    vec3 randN1=cross(normal,randN0);
+    float alpha=getRnd()*2*PI;
+    float tmp=getRnd();
+    vec2 A=pow(g,vec2(tmp-1));
+    float beta=atan(roughness*sqrt(dot(A,vec2(-g.x,g.y))/(A.x-A.y)));
+    
+    return (cos(beta))*normal+sin(beta)*(cos(alpha)*randN0+sin(alpha)*randN1);
+}
+float HGGXdf(float theta,float fai,float a,vec2 g){
+    float a2=a*a;
+    float cos2=cos(theta);cos2*=cos2;
+    vec2 A=1+(g*a2-1)*cos2;
+    return 1-log(A.x/A.y)/log(g.x/g.y);
+}
+float HGGXpdf(float theta,float fai,float a,vec2 g){
+    float a2=a*a;
+    float cos2=cos(theta);cos2*=cos2;
+    vec2 A=1+(g*a2-1)*cos2;
+    return a2*(g.x-g.y)*cos(theta)/(log(g.x/g.y)*PI*A.x*A.y);
+}

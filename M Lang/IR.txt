@@ -1,0 +1,22 @@
+local size
+%num //num号缓存
+&offset //局部变量偏移
+$offset //全局变量偏移
+@offset //常量偏移
+address %num &offset/$offset/@offset
+tmp %num size
+load %num1 %num2 //%num1=[%num2]
+num %num1 data
+store %num1 &num2 //[%num1]=%num2
+B2I %num1 %num2
+W2I %num1 %num2
+I2Q %num1 %num2
+I2F %num1 %num2
+F2D %num1 %num2
+D2F %num1 %num2
+D2I %num1 %num2
+I2Bool %num1 %num2
+CmpI %num1 %num2 %num3
+CmpD %num1 %num2 %num3
+Call %num1 %num2 %num3 ...
+...
